@@ -95,7 +95,9 @@ def get_user_info(username: str, sock: socket.socket):
         if submit_cnt == 0:
             to_send = "info_fail"
         else:
-            [user, name] = name_user.split()
+            pos = name_user.find(' ')
+            user = name_user[:pos]
+            name = name_user[pos:]
             to_send = "info:" + user + "!#@%!" + name + \
                 "!#@%!"+"完成题目    "+str(len(problem_solved_set))+"!#@%!" + \
                 "提交记录    "+str(submit_solved_cnt)+"/"+str(submit_cnt) + \
