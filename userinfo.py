@@ -30,6 +30,8 @@ def get_user_info(username: str, sock: socket.socket):
         browser.delete_all_cookies()
         user_result = []
 
+        if user_dict.get(username) is not None:
+            user_result = user_dict.get(username)
         latest_code = user_latest_submit.get(username)
         cur_latest_code: str = None
 
@@ -44,11 +46,14 @@ def get_user_info(username: str, sock: socket.socket):
 
         while True:
             try:
+                flag = False
                 for i in range(first_fetch, 16):
                     cur_code = browser.find_element(
                         By.XPATH, '//*[@id="status"]/tbody/tr[' + str(i) + ']/td[1]/a').text
-
+                    if first_fetch and i == 1:
+                        cur_latest_code = cur_code
                     if cur_code == latest_code:
+                        flag = True
                         break
 
                     cur_pro = browser.find_element(
@@ -58,8 +63,8 @@ def get_user_info(username: str, sock: socket.socket):
                     user_result.append(info_type(
                         cur_code, cur_pro, cur_result))
                     cnt += 1
-                    if first_fetch and i == 1:
-                        cur_latest_code = cur_code
+                if flag:
+                    break
 
                 if first_fetch == 1:
                     first_fetch = 2
@@ -92,7 +97,7 @@ def get_user_info(username: str, sock: socket.socket):
         else:
             [user, name] = name_user.split()
             to_send = "info:" + user + "!#@%!" + name + \
-                "!#@%!"+"完成题目    "+str(len(problem_set))+"!#@%!" + \
+                "!#@%!"+"完成题目    "+str(len(problem_solved_set))+"!#@%!" + \
                 "提交记录    "+str(submit_solved_cnt)+"/"+str(submit_cnt) + \
                 "({:.2f}%)".format(submit_solved_cnt / submit_cnt*100)
         try:
@@ -136,8 +141,8 @@ user_latest_submit = {}
 
 # 加载用户信息
 try:
-    user_dict = np.load('user_dict.npy').item()
-    user_latest_submit = np.load('user_latest.npy').item()
+    user_dict = np.load('user_dict.npy', allow_pickle=True).item()
+    user_latest_submit = np.load('user_latest.npy', allow_pickle=True).item()
 except Exception as err:
     print(err)
     print('提取用户信息失败！')
