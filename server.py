@@ -8,6 +8,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains
 import submit
+import userinfo
+import server_utils
 
 # Hyper Parameters
 SLEEP_TIME = 5
@@ -22,37 +24,48 @@ user_list = []
 # Some Defs
 
 
-def tcplink(sock, addr):
+def tcplink(sock: socket.socket, addr):
     print('Accept new connection from', addr)
     logging.info('Accept new user')
-    sock.send('welcome'.encode('utf-8'))
+    server_utils.send_msg(sock, 'welcome')
     while True:
         try:
             data: bytes = sock.recv(1024)
             print(type(data))
             if len(data) == 0:
                 break
-            ch = bytes.decode(data, encoding='utf-8')
-            print(ch)
-            logging.info("Receive:" + ch)
-            try:
-                if (ch.startswith("TODO:")):
-                    code = ch[5:9]
-                    pos = ch.find("~@$")
-                    username = ch[9:pos]
-                    password = ch[pos+3:]
-                    submit.add_to_queue(username, password, code)
-                    sock.send('submit_success'.encode('utf-8'))
-                    print('send: submit_success')
-                    logging.info('send: submit_success')
-                elif (ch.startswith("HELLO-CALL")):
-                    sock.send('FEEDBACK'.encode('utf-8'))
-                    print('send: FEEDBACK')
-            except:
-                sock.send('submit_fail'.encode('utf-8'))
+            ch_raw = bytes.decode(data, encoding='utf-8')
+
+            while len(ch_raw) != 0:
+                try:
+                    len_pos = ch_raw.find('~')
+                    length = int(ch_raw[:len_pos])
+                    ch = ch_raw[len_pos + 1: len_pos + length + 1]
+                    ch_raw = ch_raw[len_pos + length + 1:]
+                    print(ch)
+                    logging.info("Receive:" + ch)
+                    if (ch.startswith("TODO:")):
+                        code = ch[5:9]
+                        pos = ch.find("~@$")
+                        username = ch[9:pos]
+                        password = ch[pos+3:]
+                        submit.add_to_queue(username, password, code)
+                        server_utils.send_msg(sock, 'submit_success')
+                        print('send: submit_success')
+                        logging.info('send: submit_success')
+                    elif (ch.startswith("HELLO-CALL")):
+                        server_utils.send_msg(sock, 'FEEDBACK')
+                        print('send: FEEDBACK')
+                    elif (ch.startswith("INFO:")):
+                        username = ch[5:]
+                        userinfo.add_to_queue(username, sock)
+                except Exception as err:
+                    print(err)
+                    print('解析字符串时出错')
+                    break
         except:
             break
-    sock.send('submit_fail'.encode('utf-8'))
+    server_utils.send_msg(sock, 'submit_fail')
     time.sleep(2)
     sock.close()
     user_list.remove(sock)
@@ -69,13 +82,16 @@ def admin_input(s):
             able_to_exit = True
             time.sleep(3)
             s.close()
+            submit.end_service()
+            time.sleep(10)
+            print('所有服务已经结束，您可以退出程序')
             break
 
 
 def send_msg(msg_to_send: str):
     for sock in user_list:
         try:
-            sock.send(msg_to_send.encode('utf-8'))
+            server_utils.send_msg(sock, msg_to_send)
             print('已向用户发送消息')
         except Exception as e:
             print(str(e))
@@ -90,7 +106,10 @@ def listen_submit():
     option.add_argument('--no-sandbox')
     browser = webdriver.Chrome(options=option)
     print('Chrome已开启')
+
+    # 开启提交服务和用户信息采集服务
     threading.Thread(target=submit.start_service).start()
+    threading.Thread(target=userinfo.start_service).start()
 
     browser.get('https://acm.sjtu.edu.cn/OnlineJudge/status#')
     while True:
@@ -120,6 +139,7 @@ def listen_submit():
             msg_to_send = user_name + "!@#"+problem_to_solve+"!@#"+submit_result
             logging.info('New Submit:'+cur_code)
             threading.Thread(target=send_msg, args=(msg_to_send,)).start()
+
 
     # Start Listen
 print("Start Listen......")

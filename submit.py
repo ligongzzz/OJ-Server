@@ -8,13 +8,11 @@ import queue
 chromeStarted: bool = False
 
 
-def submit_code(browser, username: str, password: str, problem_to_solve: str):
-    option = webdriver.ChromeOptions()
-    option.add_argument('--headless')
-    option.add_argument('--no-sandbox')
-    browser = webdriver.Chrome(options=option)
-
+def submit_code(browser: webdriver.Chrome, username: str, password: str, problem_to_solve: str):
     try:
+        # Clear Browser Cookies
+        browser.delete_all_cookies()
+
         print("正在获取代码......")
         browser.get(
             'https://raw.githubusercontent.com/ligongzzz/SJTU-OJ/master/Code/Project'
@@ -46,13 +44,9 @@ def submit_code(browser, username: str, password: str, problem_to_solve: str):
         actions.send_keys_to_element(input_code, code_to_input)
         actions.click(btn_submit)
         actions.perform()
-        browser.quit()
         print('提交已经成功')
-        return True
     except:
         print('抱歉！出现错误')
-        browser.quit()
-        return False
 
 
 class user_type:
@@ -88,3 +82,8 @@ def start_service():
             submit_code(browser, nxt.username, nxt.password, nxt.code)
         else:
             time.sleep(0.2)
+
+
+def end_service():
+    browser.close()
+    print('提交服务已经结束')
