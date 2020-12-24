@@ -7,38 +7,8 @@ import queue
 import threading
 import socket
 import server_utils
-import requests
-from bs4 import BeautifulSoup
-import os
 
-
-def getHTMLText(url):
-    try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        r.encoding = 'utf-8'
-        return r.text
-    except:
-        return ""
-
-
-def fillUnivList(soup):
-    allUniv = []
-    data = soup.find_all('tr')
-    for tr in data:
-        ltd = tr.find_all('td')
-        if len(ltd) == 0:
-            continue
-        singleUniv = []
-        for i in range(len(ltd)):
-            if i == 2:
-                singleUniv.append(ltd[i].find('a').string)
-            elif i == 3:
-                singleUniv.append(ltd[i].find('span').string)
-            else:
-                singleUniv.append(ltd[i].string)
-        allUniv.append(singleUniv)
-    return allUniv
+chromeStarted: bool = False
 
 
 class info_type:
@@ -57,57 +27,51 @@ class user_type:
 def get_user_info(username: str, sock: socket.socket):
     try:
         # Clear Browser Cookies
+        browser.delete_all_cookies()
         user_result = []
 
         if user_dict.get(username) is not None:
             user_result = user_dict.get(username)
         latest_code = user_latest_submit.get(username)
-        cur_latest_code: str = ''
-        name_user: str = ''
+        cur_latest_code: str = None
 
         print('开始获取' + username + '的用户信息')
-        url = 'https://acm.sjtu.edu.cn/OnlineJudge/status?owner=' + \
-            username + '&problem=&language=0&verdict=0'
-        html = getHTMLText(url)
-        soup = BeautifulSoup(html, 'html.parser')
-        first_sub = soup.find_all('tr')[1].find_all('td')
-        name_user = name_user.join(first_sub[1].string)
-        cur_latest_code = cur_latest_code.join(first_sub[0].string)
+        browser.get(
+            'https://acm.sjtu.edu.cn/OnlineJudge/status?owner=' + username + '&problem=&language=0&verdict=0')
+        name_user: str = browser.find_element(
+            By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[2]').text
         # Check if the first fetch.
-        first_fetch: bool = True
+        first_fetch = 1
         cnt = 0
 
         while True:
             try:
                 flag = False
-                allUniv = fillUnivList(soup)
-
-                for i in range(len(allUniv)):
-                    if not first_fetch and i == 0:
-                        continue
-                    u = allUniv[i]
-                    if u[0] == latest_code:
+                for i in range(first_fetch, 16):
+                    cur_code = browser.find_element(
+                        By.XPATH, '//*[@id="status"]/tbody/tr[' + str(i) + ']/td[1]/a').text
+                    if first_fetch and i == 1:
+                        cur_latest_code = cur_code
+                    if cur_code == latest_code:
                         flag = True
                         break
-                    code = ''.join(u[0])
-                    problem = ''.join(u[2])
-                    result = ''.join(u[3])
-                    user_result.append(info_type(code, problem, result))
-                    cnt += 1
 
-                if first_fetch:
-                    first_fetch = False
-                if len(allUniv) < 15:
-                    break
+                    cur_pro = browser.find_element(
+                        By.XPATH, '//*[@id="status"]/tbody/tr[' + str(i) + ']/td[3]/a[1]').text
+                    cur_result = browser.find_element(
+                        By.XPATH, '//*[@id="status"]/tbody/tr[' + str(i) + ']/td[4]/span').text
+                    user_result.append(info_type(
+                        cur_code, cur_pro, cur_result))
+                    cnt += 1
                 if flag:
                     break
-                # move
-                next_code = allUniv[14][0]
-                url = 'https://acm.sjtu.edu.cn/OnlineJudge/status?owner=' + \
-                    username + '&problem=&language=0&verdict=0&top='+next_code
-                html = getHTMLText(url)
-                soup = BeautifulSoup(html, 'html.parser')
 
+                if first_fetch == 1:
+                    first_fetch = 2
+
+                # Move to another page.
+                browser.find_element(
+                    By.XPATH, '//*[@id="status"]/tbody/tr[15]/td[1]/a').click()
             except Exception as err:
                 print('结束，信息获取完成')
                 break
@@ -148,8 +112,7 @@ def get_user_info(username: str, sock: socket.socket):
             user_latest_submit[username] = cur_latest_code
             np.save('user_latest.npy', user_latest_submit)
             print('保存用户信息成功！')
-        except Exception as err:
-            print(err)
+        except:
             print('信息发送异常！')
 
     except Exception as err:
@@ -165,6 +128,15 @@ def get_user_info(username: str, sock: socket.socket):
 # User Queue
 userqueue = queue.Queue()
 
+# Browser
+option = webdriver.ChromeOptions()
+option.add_argument('--headless')
+option.add_argument('--no-sandbox')
+browser = webdriver.Chrome(options=option)
+
+print('已经启动提交chrome')
+chromeStarted = True
+
 # 用户提交数据记录
 user_dict = {}
 user_latest_submit = {}
@@ -173,7 +145,6 @@ user_latest_submit = {}
 try:
     user_dict = np.load('user_dict.npy', allow_pickle=True).item()
     user_latest_submit = np.load('user_latest.npy', allow_pickle=True).item()
-    print('提取用户信息成功')
 except Exception as err:
     print(err)
     print('提取用户信息失败！')
@@ -186,8 +157,13 @@ def add_to_queue(username: str, sock: socket.socket):
 def start_service():
     print('用户信息服务已经开启')
     while True:
-        if not userqueue.empty():
+        if not userqueue.empty() and chromeStarted:
             cur_user: user_type = userqueue.get()
             get_user_info(cur_user.username, cur_user.sock)
         else:
             time.sleep(0.2)
+
+
+def end_service():
+    browser.close()
+    print('用户信息服务已经结束')

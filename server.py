@@ -20,6 +20,7 @@ logging.basicConfig(filename="test.log", filemode="w", format="%(asctime)s %(nam
 # Globle Vars
 able_to_exit = False
 user_list = []
+last_msg_to_send: str = None
 
 # Some Defs
 
@@ -28,6 +29,8 @@ def tcplink(sock: socket.socket, addr):
     print('Accept new connection from', addr)
     logging.info('Accept new user')
     server_utils.send_msg(sock, 'welcome')
+    if last_msg_to_send is not None:
+        server_utils.send_msg(sock, last_msg_to_send)
     while True:
         try:
             data: bytes = sock.recv(1024)
@@ -43,16 +46,14 @@ def tcplink(sock: socket.socket, addr):
                     ch = ch_raw[len_pos + 1: len_pos + length + 1]
                     ch_raw = ch_raw[len_pos + length + 1:]
                     print(ch)
-                    logging.info("Receive:" + ch)
+                    if not ch.startswith('HELLO-CALL'):
+                        logging.info("Receive:" + ch)
                     if (ch.startswith("TODO:")):
                         code = ch[5:9]
                         pos = ch.find("~@$")
                         username = ch[9:pos]
                         password = ch[pos+3:]
-                        submit.add_to_queue(username, password, code)
-                        server_utils.send_msg(sock, 'submit_success')
-                        print('send: submit_success')
-                        logging.info('send: submit_success')
+                        submit.add_to_queue(username, password, code, sock)
                     elif (ch.startswith("HELLO-CALL")):
                         server_utils.send_msg(sock, 'FEEDBACK')
                         print('send: FEEDBACK')
@@ -65,7 +66,7 @@ def tcplink(sock: socket.socket, addr):
                     break
         except:
             break
-    server_utils.send_msg(sock, 'submit_fail')
+    server_utils.send_msg(sock, 'toast:服务器即将关闭，请稍后再试')
     time.sleep(2)
     sock.close()
     user_list.remove(sock)
@@ -104,7 +105,7 @@ def listen_submit():
     option = webdriver.ChromeOptions()
     option.add_argument('--headless')
     option.add_argument('--no-sandbox')
-    browser = webdriver.Chrome(options=option)
+    browser: webdriver.Chrome = webdriver.Chrome(options=option)
     print('Chrome已开启')
 
     # 开启提交服务和用户信息采集服务
@@ -113,33 +114,56 @@ def listen_submit():
 
     browser.get('https://acm.sjtu.edu.cn/OnlineJudge/status#')
     while True:
-        time.sleep(SLEEP_TIME)
-        browser.refresh()
-        cur_code = browser.find_element(
-            By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[1]/a').text
-        if cur_code != last_submit_code:
-            last_submit_code = cur_code
-            print('发现新的提交：', end=' ')
-            submit_result: str = None
-            while True:
-                submit_result: str = browser.find_element(
-                    By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[4]/span').text
-                if submit_result != '未评测' and submit_result != '正在评测' and submit_result != '等待评测':
-                    break
-                else:
-                    browser.refresh()
+        try:
+            time.sleep(SLEEP_TIME)
+            browser.refresh()
+            cur_code = browser.find_element(
+                By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[1]/a').text
+            if cur_code != last_submit_code:
+                last_submit_code = cur_code
+                print('发现新的提交：', end=' ')
+                submit_result: str = None
+                while True:
+                    submit_result: str = browser.find_element(
+                        By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[4]/span').text
+                    if submit_result != '未评测' and submit_result != '正在评测' and submit_result != '等待评测':
+                        break
+                    else:
+                        browser.refresh()
 
-            user_submit: str = browser.find_element(
-                By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[2]').text
-            [user_id, user_name] = user_submit.split()
-            problem_to_solve = browser.find_element(
-                By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[3]/a[1]').text
+                cur_code =  browser.find_element(By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[1]/a').text
+                last_submit_code = cur_code
+                user_submit: str = browser.find_element(
+                    By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[2]').text
+                pos_u = user_submit.find(' ')
+                user_id = user_submit[:pos_u]
+                user_name = user_submit[pos_u+1:]
+                problem_to_solve = browser.find_element(
+                    By.XPATH, '//*[@id="status"]/tbody/tr[1]/td[3]/a[1]').text
 
-            print('用户是', user_id, '题号是', problem_to_solve)
-            msg_to_send = user_name + "!@#"+problem_to_solve+"!@#"+submit_result
-            logging.info('New Submit:'+cur_code)
-            threading.Thread(target=send_msg, args=(msg_to_send,)).start()
-
+                print('用户是', user_id, '题号是', problem_to_solve)
+                msg_to_send = user_name + "!@#" + problem_to_solve + "!@#" + submit_result
+                global last_msg_to_send
+                last_msg_to_send = msg_to_send
+                logging.info('New Submit:'+cur_code)
+                threading.Thread(target=send_msg, args=(msg_to_send,)).start()
+        except Exception as err:
+            logging.error('检测服务异常'+err.__str__())
+            print('检测服务出现问题')
+            try:
+                # browser.close()
+                logging.info('关闭Chrome成功')
+                print('正在重新启动Chrome......')
+                option = webdriver.ChromeOptions()
+                option.add_argument('--headless')
+                option.add_argument('--no-sandbox')
+                browser = webdriver.Chrome(options=option)
+                print('Chrome已开启')
+                logging.info('Chrome已经重启')
+                browser.get('https://acm.sjtu.edu.cn/OnlineJudge/status#')
+                logging.info('检测服务重新启动完成')
+            except Exception as err_1:
+                logging.error('重新启动检测服务异常'+err_1.__str__())
 
     # Start Listen
 print("Start Listen......")
